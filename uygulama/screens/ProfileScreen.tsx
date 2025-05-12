@@ -1,289 +1,411 @@
-import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  SafeAreaView, 
-  ScrollView, 
-  TouchableOpacity, 
-  Switch,
-  Image 
+import React, { useState, useEffect } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updateProfile, User as FirebaseUser } from "firebase/auth";
+import { auth } from '../config/firebase';
+import { doc, setDoc, updateDoc } from "firebase/firestore";
+import { db } from '../config/firebase';
 
-export default function ProfileScreen() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const [isNotificationsEnabled, setIsNotificationsEnabled] = useState(true);
-  const [isLocationEnabled, setIsLocationEnabled] = useState(true);
+const ProfileScreen = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [surname, setSurname] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isLogin, setIsLogin] = useState(true);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editSurname, setEditSurname] = useState('');
+  const [editEmail, setEditEmail] = useState('');
 
-  const user = {
-    name: 'Ahmet Yılmaz',
-    username: '@ahmetyilmaz',
-    email: 'ahmet.yilmaz@example.com',
-    location: 'İstanbul, Türkiye',
-    visitedCount: 24,
-    favoriteCount: 12,
-    reviewCount: 8,
+  useEffect(() => {
+    setCurrentUser(auth.currentUser);
+  }, []);
+
+  const handleAuth = async () => {
+    if (!email || !password || (!isLogin && (!displayName || !surname))) {
+      Alert.alert('Hata', 'Lütfen tüm alanları doldurun');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      if (isLogin) {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        setCurrentUser(userCredential.user);
+      } else {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCredential.user, { displayName: displayName + ' ' + surname });
+        await setDoc(doc(db, "users", userCredential.user.uid), {
+          email,
+          firstName: displayName,
+          lastName: surname
+        });
+        setCurrentUser({ ...userCredential.user, displayName: displayName + ' ' + surname });
+      }
+      Alert.alert('Başarılı', isLogin ? 'Giriş başarılı!' : 'Kayıt başarılı!');
+    } catch (error: any) {
+      Alert.alert('Hata', error.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const recentVisits = [
-    {
-      id: '1',
-      name: 'Topkapı Sarayı',
-      date: '15 Nisan 2025',
-      photo: 'https://via.placeholder.com/150',
-    },
-    {
-      id: '2',
-      name: 'İstanbul Arkeoloji Müzesi',
-      date: '8 Nisan 2025',
-      photo: 'https://via.placeholder.com/150',
-    },
-    {
-      id: '3',
-      name: 'Ayasofya',
-      date: '27 Mart 2025',
-      photo: 'https://via.placeholder.com/150',
-    },
-  ];
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setCurrentUser(null);
+      Alert.alert('Başarılı', 'Çıkış yapıldı');
+    } catch (error: any) {
+      Alert.alert('Hata', error.message);
+    }
+  };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
+  const openEditModal = () => {
+    const [ad, soyad] = (currentUser?.displayName || '').split(' ');
+    setEditName(ad || '');
+    setEditSurname(soyad || '');
+    setEditEmail(currentUser?.email || '');
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editName || !editSurname) {
+      Alert.alert('Hata', 'İsim ve soyisim boş olamaz');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { displayName: editName + ' ' + editSurname });
+        await updateDoc(doc(db, "users", auth.currentUser.uid), {
+          firstName: editName,
+          lastName: editSurname
+        });
+        setCurrentUser({ ...auth.currentUser, displayName: editName + ' ' + editSurname });
+        setEditModalVisible(false);
+        Alert.alert('Başarılı', 'Profil güncellendi!');
+      }
+    } catch (error: any) {
+      Alert.alert('Hata', error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (currentUser) {
+    const [ad, soyad] = (currentUser.displayName || '').split(' ');
+    return (
+      <View style={styles.root}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Profil</Text>
-          <TouchableOpacity style={styles.settingsButton}>
-            <Ionicons name="settings-outline" size={24} color="#333" />
+          <Ionicons name="person-circle" size={90} color="#007AFF" style={styles.avatar} />
+        </View>
+        <View style={styles.infoCard}>
+          <Text style={styles.label}>İsim</Text>
+          <Text style={styles.value}>{ad || '-'}</Text>
+          <Text style={styles.label}>Soyisim</Text>
+          <Text style={styles.value}>{soyad || '-'}</Text>
+          <Text style={styles.label}>E-posta</Text>
+          <Text style={styles.value}>{currentUser.email}</Text>
+          <Text style={styles.label}>Kayıt Tarihi</Text>
+          <Text style={styles.value}>
+            {currentUser.metadata?.creationTime ? new Date(currentUser.metadata.creationTime).toLocaleDateString() : '-'}
+          </Text>
+        </View>
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.editButton} onPress={openEditModal}>
+            <Ionicons name="create-outline" size={18} color="#007AFF" />
+            <Text style={styles.editButtonText}>Düzenle</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut}>
+            <Ionicons name="log-out-outline" size={18} color="#fff" />
+            <Text style={styles.logoutButtonText}>Çıkış</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Profile Info */}
-        <View style={styles.profileSection}>
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Ionicons name="person" size={40} color="#666" />
-            </View>
-          </View>
-          <Text style={styles.name}>{user.name}</Text>
-          <Text style={styles.username}>{user.username}</Text>
-          <View style={styles.locationContainer}>
-            <Ionicons name="location-outline" size={16} color="#666" />
-            <Text style={styles.location}>{user.location}</Text>
-          </View>
-
-          {/* Stats */}
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{user.visitedCount}</Text>
-              <Text style={styles.statLabel}>Ziyaret</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{user.favoriteCount}</Text>
-              <Text style={styles.statLabel}>Favori</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{user.reviewCount}</Text>
-              <Text style={styles.statLabel}>Yorum</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Settings */}
-        <View style={styles.settingsSection}>
-          <Text style={styles.sectionTitle}>Ayarlar</Text>
-          <View style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <Ionicons name="moon-outline" size={24} color="#333" />
-              <Text style={styles.settingLabel}>Karanlık Mod</Text>
-            </View>
-            <Switch
-              value={isDarkMode}
-              onValueChange={setIsDarkMode}
-              trackColor={{ false: '#767577', true: '#81b0ff' }}
-              thumbColor={isDarkMode ? '#0066cc' : '#f4f3f4'}
-            />
-          </View>
-          <View style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <Ionicons name="notifications-outline" size={24} color="#333" />
-              <Text style={styles.settingLabel}>Bildirimler</Text>
-            </View>
-            <Switch
-              value={isNotificationsEnabled}
-              onValueChange={setIsNotificationsEnabled}
-              trackColor={{ false: '#767577', true: '#81b0ff' }}
-              thumbColor={isNotificationsEnabled ? '#0066cc' : '#f4f3f4'}
-            />
-          </View>
-          <View style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <Ionicons name="location-outline" size={24} color="#333" />
-              <Text style={styles.settingLabel}>Konum</Text>
-            </View>
-            <Switch
-              value={isLocationEnabled}
-              onValueChange={setIsLocationEnabled}
-              trackColor={{ false: '#767577', true: '#81b0ff' }}
-              thumbColor={isLocationEnabled ? '#0066cc' : '#f4f3f4'}
-            />
-          </View>
-        </View>
-
-        {/* Recent Visits */}
-        <View style={styles.recentVisitsSection}>
-          <Text style={styles.sectionTitle}>Son Ziyaretler</Text>
-          {recentVisits.map(visit => (
-            <TouchableOpacity key={visit.id} style={styles.visitItem}>
-              <Image
-                source={{ uri: visit.photo }}
-                style={styles.visitImage}
+        {/* Profil Düzenleme Modalı */}
+        <Modal
+          visible={editModalVisible}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setEditModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Profili Düzenle</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="İsim"
+                value={editName}
+                onChangeText={setEditName}
               />
-              <View style={styles.visitInfo}>
-                <Text style={styles.visitName}>{visit.name}</Text>
-                <Text style={styles.visitDate}>{visit.date}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={24} color="#ccc" />
-            </TouchableOpacity>
-          ))}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+              <TextInput
+                style={styles.input}
+                placeholder="Soyisim"
+                value={editSurname}
+                onChangeText={setEditSurname}
+              />
+              <TextInput
+                style={[styles.input, { backgroundColor: '#eee' }]}
+                placeholder="Email"
+                value={editEmail}
+                editable={false}
+              />
+              <TouchableOpacity
+                style={styles.authButton}
+                onPress={handleSaveEdit}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.authButtonText}>Kaydet</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setEditModalVisible(false)}
+              >
+                <Text style={styles.cancelButtonText}>İptal</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.root}>
+      <View style={styles.header}>
+        <Ionicons name="person-circle" size={90} color="#007AFF" style={styles.avatar} />
+      </View>
+      <View style={styles.infoCard}>
+        <Text style={styles.formTitle}>{isLogin ? 'Giriş Yap' : 'Kayıt Ol'}</Text>
+        {!isLogin && (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="İsim"
+              value={displayName}
+              onChangeText={setDisplayName}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Soyisim"
+              value={surname}
+              onChangeText={setSurname}
+            />
+          </>
+        )}
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Şifre"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+        <TouchableOpacity
+          style={styles.authButton}
+          onPress={handleAuth}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.authButtonText}>
+              {isLogin ? 'Giriş Yap' : 'Kayıt Ol'}
+            </Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.switchButton}
+          onPress={() => setIsLogin(!isLogin)}
+        >
+          <Text style={styles.switchButtonText}>
+            {isLogin ? 'Hesabınız yok mu? Kayıt olun' : 'Zaten hesabınız var mı? Giriş yapın'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: '#f5f7fa',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  settingsButton: {
-    padding: 8,
-  },
-  profileSection: {
-    alignItems: 'center',
-    padding: 20,
+    width: '100%',
+    height: 115,
     backgroundColor: '#fff',
-    marginBottom: 20,
-  },
-  avatarContainer: {
-    marginBottom: 16,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginBottom: 0,
+    paddingTop: 30,
   },
   avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#f0f0f0',
+    marginTop: 0,
+    marginBottom: 0,
+    zIndex: 2,
+    alignSelf: 'center',
+  },
+  infoCard: {
+    backgroundColor: '#fff',
+    width: '90%',
+    borderRadius: 18,
+    padding: 24,
+    marginTop: 60,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  label: {
+    fontSize: 13,
+    color: '#888',
+    marginTop: 8,
+    marginBottom: 2,
+    alignSelf: 'flex-start',
+  },
+  value: {
+    fontSize: 17,
+    color: '#222',
+    fontWeight: 'bold',
+    alignSelf: 'flex-start',
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '90%',
+    marginTop: 18,
+    marginBottom: 8,
+    alignSelf: 'center',
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e6f0ff',
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  editButtonText: {
+    color: '#007AFF',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF5A5F',
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 20,
+    marginLeft: 10,
+  },
+  logoutButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  formTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#222',
+    marginBottom: 18,
+    textAlign: 'center',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: 13,
+    borderRadius: 8,
+    marginBottom: 14,
+    fontSize: 15,
+    backgroundColor: '#f7f7f7',
+    width: 250,
+  },
+  authButton: {
+    backgroundColor: '#007AFF',
+    padding: 13,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    width: 250,
+  },
+  authButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  switchButton: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  switchButtonText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  name: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  username: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 8,
-  },
-  locationContainer: {
-    flexDirection: 'row',
+  modalContent: {
+    width: '85%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  location: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 4,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statNumber: {
+  modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#222',
+    marginBottom: 18,
   },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
+  cancelButton: {
+    marginTop: 10,
+    alignItems: 'center',
   },
-  settingsSection: {
-    backgroundColor: '#fff',
-    padding: 20,
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
+  cancelButtonText: {
+    color: '#FF5A5F',
+    fontSize: 15,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 16,
-  },
-  settingItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  settingLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  settingLabel: {
-    fontSize: 16,
-    color: '#333',
-    marginLeft: 12,
-  },
-  recentVisitsSection: {
-    backgroundColor: '#fff',
-    padding: 20,
-    marginBottom: 20,
-  },
-  visitItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  visitImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    marginRight: 12,
-  },
-  visitInfo: {
-    flex: 1,
-  },
-  visitName: {
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 4,
-  },
-  visitDate: {
-    fontSize: 14,
-    color: '#666',
   },
 });
+
+export default ProfileScreen;
